@@ -1,6 +1,7 @@
 const express = require("express");
 const router = express.Router();
 const admin = require("firebase-admin");
+const db = admin.firestore();
 
 // Route POST /users/login
 router.post("/login", async (req, res) => {
@@ -48,32 +49,32 @@ router.get('/:uid', async (req, res) => {
     }
   });
   
-  // PUT update user profile
-  router.put('/:uid', async (req, res) => {
+// PUT update user profile
+router.put('/:uid', async (req, res) => {
     const { uid } = req.params;
     const { nom, prenom, type, email, tel, adresse } = req.body;
-  
+
     try {
-      const userRef = db.collection('users').doc(uid);
-      const userDoc = await userRef.get();
-  
-      if (!userDoc.exists) {
+        const userRef = db.collection('users').doc(uid);
+        const userDoc = await userRef.get();
+
+        if (!userDoc.exists) {
         return res.status(404).json({ error: 'User not found' });
-      }
-  
-      await userRef.update({
+        }
+
+        await userRef.update({
         name: nom,
         prenom,
         type,
         email,
         tel,
         adresse
-      });
-  
-      res.json({ message: 'User profile updated successfully' });
+        });
+
+        res.json({ message: 'User profile updated successfully' });
     } catch (err) {
-      res.status(500).json({ error: 'Failed to update user profile', details: err.message });
+        res.status(500).json({ error: 'Failed to update user profile', details: err.message });
     }
-  });
+});
 
 module.exports = router;
