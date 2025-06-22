@@ -271,6 +271,93 @@ router.get('/all', async (req, res) => {
   }
 });
 
+router.post('/adddepot', async (req, res) => {
+  const { email, vendeurEmail, nom_jeu, etat, prix } = req.body;
+
+  if (!email || !vendeurEmail || !nom_jeu || !etat || prix == null) {
+    return res.status(400).json({ error: 'Champs requis manquants.' });
+  }
+
+  try {
+    const usersRef = db.collection('users');
+    const snapshot = await usersRef.where('email', '==', email).get();
+
+    if (snapshot.empty) {
+      return res.status(404).json({ error: 'Gestionnaire non trouvé.' });
+    }
+
+    const userDoc = snapshot.docs[0];
+    const userData = userDoc.data();
+
+    const vendeurs = userData.vendeurs || [];
+    const index = vendeurs.findIndex(v => v.mail === vendeurEmail);
+
+    if (index === -1) {
+      return res.status(404).json({ error: 'Vendeur non trouvé.' });
+    }
+
+    const nouveauDepot = {
+      nom_jeu,
+      etat,
+      prix: Number(prix),
+      prix_ttc: null,
+      situation: 'stock',
+      date_vente: null,
+    };
+
+    vendeurs[index].listedepot = vendeurs[index].listedepot || [];
+    vendeurs[index].listedepot.push(nouveauDepot);
+
+    await usersRef.doc(userDoc.id).update({ vendeurs });
+
+    res.status(200).json({ message: 'Dépôt ajouté avec succès.', depot: nouveauDepot });
+  } catch (error) {
+    res.status(500).json({
+      error: 'Erreur lors de l’ajout du dépôt.',
+      details: error.message,
+    });
+  }
+});
+
+router.delete('/deletedepot', async (req, res) => {
+  const { email, vendeurEmail, nom_jeu } = req.body;
+
+  if (!email || !vendeurEmail || !nom_jeu) {
+    return res.status(400).json({ error: 'Email du gestionnaire, email du vendeur et nom du jeu requis.' });
+  }
+
+  try {
+    const usersRef = db.collection('users');
+    const snapshot = await usersRef.where('email', '==', email).get();
+
+    if (snapshot.empty) {
+      return res.status(404).json({ error: 'Gestionnaire non trouvé.' });
+    }
+
+    const userDoc = snapshot.docs[0];
+    const userData = userDoc.data();
+    const vendeurs = userData.vendeurs || [];
+
+    const vendeurIndex = vendeurs.findIndex(v => v.mail === vendeurEmail);
+    if (vendeurIndex === -1) {
+      return res.status(404).json({ error: 'Vendeur non trouvé.' });
+    }
+
+    const listedepot = vendeurs[vendeurIndex].listedepot || [];
+    const updatedDepots = listedepot.filter(depot => depot.nom_jeu !== nom_jeu);
+
+    if (updatedDepots.length === listedepot.length) {
+      return res.status(404).json({ error: 'Dépôt non trouvé (nom de jeu non correspondant).' });
+    }
+
+    vendeurs[vendeurIndex].listedepot = updatedDepots;
+    await usersRef.doc(userDoc.id).update({ vendeurs });
+
+    res.status(200).json({ message: 'Dépôt supprimé avec succès.' });
+  } catch (error) {
+    res.status(500).json({ error: 'Erreur lors de la suppression du dépôt.', details: error.message });
+  }
+});
 
 
 module.exports = router;
