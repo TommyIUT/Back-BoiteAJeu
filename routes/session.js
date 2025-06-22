@@ -38,4 +38,31 @@ router.get("/all", async (req, res) => {
   }
 });
 
+// Obtenir la session en cours
+router.get("/current", async (req, res) => {
+  try {
+    const now = new Date();
+
+    const snapshot = await db
+      .collection("session")
+      .where("debut", "<=", now)
+      .where("fin", ">=", now)
+      .get();
+
+    if (snapshot.empty) {
+      return res.status(404).json({ error: "Aucune session en cours trouvée." });
+    }
+
+    const session = snapshot.docs[0];
+    res.status(200).json({ id: session.id, ...session.data() });
+
+  } catch (error) {
+    res.status(500).json({
+      error: "Erreur lors de la récupération de la session actuelle.",
+      details: error.message
+    });
+  }
+});
+
+
 module.exports = router;

@@ -287,16 +287,17 @@ router.post('/adddepot', async (req, res) => {
     }
 
     const userDoc = snapshot.docs[0];
+    const userId = userDoc.id;
     const userData = userDoc.data();
-
     const vendeurs = userData.vendeurs || [];
-    const index = vendeurs.findIndex(v => v.mail === vendeurEmail);
 
+    const index = vendeurs.findIndex(v => v.mail === vendeurEmail);
     if (index === -1) {
       return res.status(404).json({ error: 'Vendeur non trouvé.' });
     }
 
     const nouveauDepot = {
+      id: Math.random().toString(36).substring(2, 10), // ✅ ID unique généré ici
       nom_jeu,
       etat,
       prix: Number(prix),
@@ -308,9 +309,37 @@ router.post('/adddepot', async (req, res) => {
     vendeurs[index].listedepot = vendeurs[index].listedepot || [];
     vendeurs[index].listedepot.push(nouveauDepot);
 
-    await usersRef.doc(userDoc.id).update({ vendeurs });
+    // 🔍 Récupérer le frais_depot de la session en cours
+    const now = new Date();
+    const sessionSnap = await db
+      .collection('session')
+      .where('debut', '<=', now)
+      .where('fin', '>=', now)
+      .get();
 
-    res.status(200).json({ message: 'Dépôt ajouté avec succès.', depot: nouveauDepot });
+    if (sessionSnap.empty) {
+      return res.status(400).json({ error: 'Aucune session en cours trouvée.' });
+    }
+
+    const sessionData = sessionSnap.docs[0].data();
+    const fraisDepot = sessionData.frais_depot || 0;
+
+    // 💰 Calculer et mettre à jour les gains
+    const depotFee = (Number(prix) * fraisDepot) / 100;
+    const nouveauGain = (userData.gains || 0) + depotFee;
+
+    await usersRef.doc(userId).update({
+      vendeurs,
+      gains: nouveauGain,
+    });
+
+    res.status(200).json({
+      message: 'Dépôt ajouté avec succès et gains mis à jour.',
+      depot: nouveauDepot,
+      gain_ajoute: depotFee,
+      nouveau_total_gains: nouveauGain
+    });
+
   } catch (error) {
     res.status(500).json({
       error: 'Erreur lors de l’ajout du dépôt.',
@@ -318,7 +347,6 @@ router.post('/adddepot', async (req, res) => {
     });
   }
 });
-
 router.delete('/deletedepot', async (req, res) => {
   const { email, vendeurEmail, nom_jeu } = req.body;
 
@@ -358,6 +386,83 @@ router.delete('/deletedepot', async (req, res) => {
     res.status(500).json({ error: 'Erreur lors de la suppression du dépôt.', details: error.message });
   }
 });
+
+router.post('/miseenvente', async (req, res) => {
+  const { email, vendeurEmail, idDepot } = req.body;
+
+  if (!email || !vendeurEmail || !idDepot) {
+    return res.status(400).json({ error: 'Champs requis manquants.' });
+  }
+
+  try {
+    const usersRef = db.collection('users');
+    const snapshot = await usersRef.where('email', '==', email).get();
+
+    if (snapshot.empty) {
+      return res.status(404).json({ error: 'Gestionnaire non trouvé.' });
+    }
+
+    const userDoc = snapshot.docs[0];
+    const userId = userDoc.id;
+    const userData = userDoc.data();
+    const vendeurs = userData.vendeurs || [];
+
+    const indexVendeur = vendeurs.findIndex(v => v.mail === vendeurEmail);
+    if (indexVendeur === -1) {
+      return res.status(404).json({ error: 'Vendeur non trouvé.' });
+    }
+
+    const listedepot = vendeurs[indexVendeur].listedepot || [];
+    const indexDepot = listedepot.findIndex(d => d.id === idDepot);
+    if (indexDepot === -1) {
+      return res.status(404).json({ error: 'Dépôt non trouvé.' });
+    }
+
+    const depot = listedepot[indexDepot];
+    if (depot.situation !== 'stock') {
+      return res.status(400).json({ error: 'Le dépôt n’est pas en stock. Impossible de le mettre en vente.' });
+    }
+
+    // 🔍 Récupérer la session en cours
+    const now = new Date();
+    const sessionSnap = await db
+      .collection('session')
+      .where('debut', '<=', now)
+      .where('fin', '>=', now)
+      .get();
+
+    if (sessionSnap.empty) {
+      return res.status(400).json({ error: 'Aucune session en cours trouvée.' });
+    }
+
+    const sessionData = sessionSnap.docs[0].data();
+    const tCommission = sessionData.t_commission || 0;
+
+    // 💸 Calcul du prix TTC
+    const prixBase = depot.prix;
+    const prixTTC = prixBase + (prixBase * tCommission) / 100;
+
+    // Mise à jour du dépôt
+    listedepot[indexDepot].situation = 'vente';
+    listedepot[indexDepot].prix_ttc = Number(prixTTC.toFixed(2));
+
+    // Sauvegarde en base
+    vendeurs[indexVendeur].listedepot = listedepot;
+    await usersRef.doc(userId).update({ vendeurs });
+
+    res.status(200).json({
+      message: 'Jeu mis en vente avec succès.',
+      depot: listedepot[indexDepot]
+    });
+
+  } catch (error) {
+    res.status(500).json({
+      error: 'Erreur lors de la mise en vente.',
+      details: error.message,
+    });
+  }
+});
+
 
 
 module.exports = router;
