@@ -507,25 +507,27 @@ router.get('/getdepotsenvente', async (req, res) => {
 
     usersSnapshot.forEach(doc => {
       const userData = doc.data();
-      const vendeurs = userData.vendeurs || [];
-      
-      vendeurs.forEach(vendeur => {
-        const depots = vendeur.listedepot || [];
+      if (userData.type === "gestionnaire"){
+        const vendeurs = userData.vendeurs || [];
+        
+        vendeurs.forEach(vendeur => {
+          const depots = vendeur.listedepot || [];
 
-        depots.forEach(depot => {
-          if (depot.situation === 'vente') {
-            depotsEnVente.push({
-              gestionnaire: userData.email,
-              vendeur: vendeur.mail,
-              nom_jeu: depot.nom_jeu,
-              etat: depot.etat,
-              prix: depot.prix,
-              prix_ttc: depot.prix_ttc,
-              id: depot.id, // si tu as généré des ids dans tes dépôts
-            });
-          }
+          depots.forEach(depot => {
+            if (depot.situation === 'vente') {
+              depotsEnVente.push({
+                gestionnaire: userData.email,
+                vendeur: vendeur.mail,
+                nom_jeu: depot.nom_jeu,
+                etat: depot.etat,
+                prix: depot.prix,
+                prix_ttc: depot.prix_ttc,
+                id: depot.id, // si tu as généré des ids dans tes dépôts
+              });
+            }
+          });
         });
-      });
+      }
     });
 
     res.status(200).json(depotsEnVente);
