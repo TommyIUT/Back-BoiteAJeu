@@ -347,6 +347,43 @@ router.post('/adddepot', async (req, res) => {
     });
   }
 });
+
+router.get('/getdepots', async (req, res) => {
+  const { email, vendeurEmail } = req.body;
+
+  if (!email || !vendeurEmail) {
+    return res.status(400).json({ error: 'Email du gestionnaire ou du vendeur manquant.' });
+  }
+
+  try {
+    const usersRef = db.collection('users');
+    const snapshot = await usersRef.where('email', '==', email).get();
+
+    if (snapshot.empty) {
+      return res.status(404).json({ error: 'Gestionnaire non trouvé.' });
+    }
+
+    const userDoc = snapshot.docs[0];
+    const userData = userDoc.data();
+    const vendeurs = userData.vendeurs || [];
+
+    const vendeur = vendeurs.find(v => v.mail === vendeurEmail);
+    if (!vendeur) {
+      return res.status(404).json({ error: 'Vendeur non trouvé.' });
+    }
+
+    const listedepot = vendeur.listedepot || [];
+
+    res.status(200).json({ listedepot });
+  } catch (error) {
+    res.status(500).json({
+      error: 'Erreur lors de la récupération des dépôts.',
+      details: error.message,
+    });
+  }
+});
+
+
 router.delete('/deletedepot', async (req, res) => {
   const { email, vendeurEmail, nom_jeu } = req.body;
 
@@ -463,6 +500,230 @@ router.post('/miseenvente', async (req, res) => {
   }
 });
 
+router.get('/getdepotsenvente', async (req, res) => {
+  try {
+    const usersSnapshot = await db.collection('users').get();
+    const depotsEnVente = [];
 
+    usersSnapshot.forEach(doc => {
+      const userData = doc.data();
+      const vendeurs = userData.vendeurs || [];
+      
+      vendeurs.forEach(vendeur => {
+        const depots = vendeur.listedepot || [];
+
+        depots.forEach(depot => {
+          if (depot.situation === 'vente') {
+            depotsEnVente.push({
+              gestionnaire: userData.email,
+              vendeur: vendeur.mail,
+              nom_jeu: depot.nom_jeu,
+              etat: depot.etat,
+              prix: depot.prix,
+              prix_ttc: depot.prix_ttc,
+              id: depot.id, // si tu as généré des ids dans tes dépôts
+            });
+          }
+        });
+      });
+    });
+
+    res.status(200).json(depotsEnVente);
+  } catch (error) {
+    res.status(500).json({
+      error: 'Erreur lors de la récupération des dépôts en vente.',
+      details: error.message,
+    });
+  }
+});
+
+router.post("/buy", async (req, res) => {
+  const { emailAcheteur, idDepot } = req.body;
+
+  if (!emailAcheteur || !idDepot) {
+    return res.status(400).json({ error: "Email acheteur ou id du dépôt manquant." });
+  }
+
+  try {
+    const usersRef = db.collection("users");
+    const usersSnap = await usersRef.get();
+
+    let depotTrouve = null;
+    let gestionnaireId = null;
+    let vendeurIndex = -1;
+    let depotIndex = -1;
+
+    // 🔍 Trouver le dépôt par id dans tous les vendeurs de tous les gestionnaires
+    for (const doc of usersSnap.docs) {
+      const data = doc.data();
+      if (data.type !== "gestionnaire") continue;
+
+      const vendeurs = data.vendeurs || [];
+      for (let i = 0; i < vendeurs.length; i++) {
+        const listedepot = vendeurs[i].listedepot || [];
+        const dIndex = listedepot.findIndex(d => d.id === idDepot);
+        if (dIndex !== -1) {
+          depotTrouve = listedepot[dIndex];
+          gestionnaireId = doc.id;
+          vendeurIndex = i;
+          depotIndex = dIndex;
+          break;
+        }
+      }
+      if (depotTrouve) break;
+    }
+
+    if (!depotTrouve) {
+      return res.status(404).json({ error: "Dépôt introuvable." });
+    }
+
+    // 📅 Marquer le dépôt comme vendu
+    const dateAchat = new Date();
+    depotTrouve.situation = "vendu";
+    depotTrouve.date_vente = dateAchat;
+
+    // 💾 Mettre à jour le dépôt dans Firestore
+    await usersRef.doc(gestionnaireId).update({
+      [`vendeurs.${vendeurIndex}.listedepot.${depotIndex}`]: depotTrouve
+    });
+
+    // ➕ Ajouter la commande à l'acheteur
+    const acheteurSnap = await usersRef.where("email", "==", emailAcheteur).get();
+    if (acheteurSnap.empty) {
+      return res.status(404).json({ error: "Acheteur introuvable." });
+    }
+
+    const acheteurDoc = acheteurSnap.docs[0];
+    const acheteurData = acheteurDoc.data();
+    const commandes = acheteurData.commandes || [];
+
+    const nouvelleCommande = {
+      nom_jeu: depotTrouve.nom_jeu,
+      etat: depotTrouve.etat,
+      prix_ttc: depotTrouve.prix_ttc,
+      date_achat: dateAchat,
+      id: depotTrouve.id,
+      situation: "vendu"
+    };
+
+    commandes.push(nouvelleCommande);
+
+    await usersRef.doc(acheteurDoc.id).update({ commandes });
+
+    res.status(200).json({
+      message: "Achat effectué avec succès.",
+      commande: nouvelleCommande
+    });
+
+  } catch (error) {
+    res.status(500).json({
+      error: "Erreur lors de l’achat.",
+      details: error.message
+    });
+  }
+});
+
+router.post('/validatePayment', async (req, res) => {
+  const { emailAcheteur, idDepot } = req.body;
+
+  if (!emailAcheteur || !idDepot) {
+    return res.status(400).json({ error: 'Champs requis manquants.' });
+  }
+
+  try {
+    // 🔍 Récupérer l'utilisateur acheteur
+    const acheteurSnap = await db.collection('users').where('email', '==', emailAcheteur).get();
+    if (acheteurSnap.empty) return res.status(404).json({ error: 'Acheteur non trouvé.' });
+
+    const acheteurDoc = acheteurSnap.docs[0];
+    const acheteurId = acheteurDoc.id;
+    const acheteurData = acheteurDoc.data();
+    const commandes = acheteurData.commandes || [];
+
+    // 🧾 Trouver la commande associée
+    const commandeIndex = commandes.findIndex(cmd => cmd.id === idDepot);
+    if (commandeIndex === -1) return res.status(404).json({ error: 'Commande non trouvée.' });
+
+    const commande = commandes[commandeIndex];
+
+    // 📦 Rechercher le dépôt correspondant
+    const usersSnap = await db.collection('users').get();
+    let gestionnaireDoc = null;
+    let vendeurIndex = -1;
+    let depotIndex = -1;
+
+    for (const doc of usersSnap.docs) {
+      const data = doc.data();
+      const vendeurs = data.vendeurs || [];
+
+      for (let i = 0; i < vendeurs.length; i++) {
+        const depots = vendeurs[i].listedepot || [];
+        const idx = depots.findIndex(d => d.id === idDepot);
+        if (idx !== -1) {
+          gestionnaireDoc = doc;
+          vendeurIndex = i;
+          depotIndex = idx;
+          break;
+        }
+      }
+
+      if (gestionnaireDoc) break;
+    }
+
+    if (!gestionnaireDoc) {
+      return res.status(404).json({ error: 'Dépôt non trouvé chez un vendeur.' });
+    }
+
+    const gestionnaireId = gestionnaireDoc.id;
+    const gestionnaireData = gestionnaireDoc.data();
+    const vendeurs = gestionnaireData.vendeurs;
+
+    const depot = vendeurs[vendeurIndex].listedepot[depotIndex];
+    const prixHT = depot.prix;
+
+    // 📆 Récupérer la session en cours
+    const now = new Date();
+    const sessionSnap = await db.collection('session')
+      .where('debut', '<=', now)
+      .where('fin', '>=', now)
+      .get();
+
+    if (sessionSnap.empty) {
+      return res.status(400).json({ error: 'Aucune session en cours trouvée.' });
+    }
+
+    const sessionDoc = sessionSnap.docs[0];
+    const sessionId = sessionDoc.id;
+    const sessionData = sessionDoc.data();
+    const tauxCommission = sessionData.t_commission || 0;
+
+    // 💰 Calculer la commission
+    const commissionAjoutee = (prixHT * tauxCommission) / 100;
+    const nouvelleCommission = (sessionData.commission || 0) + commissionAjoutee;
+
+    // ✅ Mise à jour des statuts
+    depot.situation = 'paie';
+    commande.situation = 'paie';
+
+    // 💸 Mise à jour des gains vendeur
+    vendeurs[vendeurIndex].gains += prixHT;
+
+    // 📝 Sauvegarder les modifications
+    await db.collection('users').doc(gestionnaireId).update({ vendeurs });
+    await db.collection('users').doc(acheteurId).update({ commandes });
+    await db.collection('session').doc(sessionId).update({ commission: nouvelleCommission });
+
+    res.status(200).json({
+      message: 'Paiement validé.',
+      commission_ajoutee: commissionAjoutee,
+      nouveau_total_commission: nouvelleCommission,
+      gains_vendeur_ajoutes: prixHT
+    });
+
+  } catch (err) {
+    console.error('Erreur /validatePayment :', err.message);
+    res.status(500).json({ error: 'Erreur serveur.', details: err.message });
+  }
+});
 
 module.exports = router;
