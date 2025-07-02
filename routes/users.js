@@ -507,11 +507,12 @@ router.get('/getdepotsenvente', async (req, res) => {
 
     usersSnapshot.forEach(doc => {
       const userData = doc.data();
-      if (userData.type === "gestionnaire"){
-        const vendeurs = userData.vendeurs || [];
-        
+
+      if (userData.type === "gestionnaire") {
+        const vendeurs = Array.isArray(userData.vendeurs) ? userData.vendeurs : [];
+
         vendeurs.forEach(vendeur => {
-          const depots = vendeur.listedepot || [];
+          const depots = Array.isArray(vendeur.listedepot) ? vendeur.listedepot : [];
 
           depots.forEach(depot => {
             if (depot.situation === 'vente') {
@@ -522,7 +523,7 @@ router.get('/getdepotsenvente', async (req, res) => {
                 etat: depot.etat,
                 prix: depot.prix,
                 prix_ttc: depot.prix_ttc,
-                id: depot.id, // si tu as généré des ids dans tes dépôts
+                id: depot.id || null,
               });
             }
           });
@@ -534,10 +535,11 @@ router.get('/getdepotsenvente', async (req, res) => {
   } catch (error) {
     res.status(500).json({
       error: 'Erreur lors de la récupération des dépôts en vente.',
-      details: error.message,
+      details: error.message
     });
   }
 });
+
 
 router.post("/buy", async (req, res) => {
   const { emailAcheteur, idDepot } = req.body;
@@ -554,21 +556,24 @@ router.post("/buy", async (req, res) => {
     let gestionnaireId = null;
     let vendeurIndex = -1;
     let depotIndex = -1;
+    let vendeurs = [];
 
-    // 🔍 Trouver le dépôt par id dans tous les vendeurs de tous les gestionnaires
+    // 🔍 Parcourir les utilisateurs pour trouver le dépôt
     for (const doc of usersSnap.docs) {
       const data = doc.data();
       if (data.type !== "gestionnaire") continue;
 
-      const vendeurs = data.vendeurs || [];
-      for (let i = 0; i < vendeurs.length; i++) {
-        const listedepot = vendeurs[i].listedepot || [];
+      const vendeursLocaux = data.vendeurs || [];
+
+      for (let i = 0; i < vendeursLocaux.length; i++) {
+        const listedepot = vendeursLocaux[i].listedepot || [];
         const dIndex = listedepot.findIndex(d => d.id === idDepot);
         if (dIndex !== -1) {
           depotTrouve = listedepot[dIndex];
           gestionnaireId = doc.id;
           vendeurIndex = i;
           depotIndex = dIndex;
+          vendeurs = vendeursLocaux;
           break;
         }
       }
@@ -579,17 +584,17 @@ router.post("/buy", async (req, res) => {
       return res.status(404).json({ error: "Dépôt introuvable." });
     }
 
-    // 📅 Marquer le dépôt comme vendu
+    // 🗓️ Mettre à jour le dépôt localement
     const dateAchat = new Date();
     depotTrouve.situation = "vendu";
     depotTrouve.date_vente = dateAchat;
 
-    // 💾 Mettre à jour le dépôt dans Firestore
-    await usersRef.doc(gestionnaireId).update({
-      [`vendeurs.${vendeurIndex}.listedepot.${depotIndex}`]: depotTrouve
-    });
+    vendeurs[vendeurIndex].listedepot[depotIndex] = depotTrouve;
 
-    // ➕ Ajouter la commande à l'acheteur
+    // ✅ Mettre à jour tout le tableau vendeurs
+    await usersRef.doc(gestionnaireId).update({ vendeurs });
+
+    // 🔍 Récupérer l'acheteur
     const acheteurSnap = await usersRef.where("email", "==", emailAcheteur).get();
     if (acheteurSnap.empty) {
       return res.status(404).json({ error: "Acheteur introuvable." });
@@ -599,6 +604,7 @@ router.post("/buy", async (req, res) => {
     const acheteurData = acheteurDoc.data();
     const commandes = acheteurData.commandes || [];
 
+    // 🧾 Nouvelle commande
     const nouvelleCommande = {
       nom_jeu: depotTrouve.nom_jeu,
       etat: depotTrouve.etat,
@@ -610,6 +616,7 @@ router.post("/buy", async (req, res) => {
 
     commandes.push(nouvelleCommande);
 
+    // ✅ Mettre à jour l'acheteur
     await usersRef.doc(acheteurDoc.id).update({ commandes });
 
     res.status(200).json({
@@ -624,6 +631,7 @@ router.post("/buy", async (req, res) => {
     });
   }
 });
+
 
 router.post('/validatePayment', async (req, res) => {
   const { emailAcheteur, idDepot } = req.body;
