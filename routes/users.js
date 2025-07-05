@@ -5,28 +5,44 @@ const db = admin.firestore();
 
 // routes/users.js (login)
 router.post("/login", async (req, res) => {
-  const { idToken } = req.body;
+  const { email, password } = req.body;
 
-  if (!idToken) {
-    return res.status(400).json({ error: "Token manquant" });
+  if (!email || !password) {
+    return res.status(400).json({ error: "Email et mot de passe requis" });
   }
 
   try {
-    // Vérifier le token reçu côté serveur
-    const decodedToken = await admin.auth().verifyIdToken(idToken);
-    const uid = decodedToken.uid;
+    // 1. Se connecter via l’API REST Firebase Auth
+    const authResponse = await axios.post(
+      `https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key=${FIREBASE_API_KEY}`,
+      {
+        email,
+        password,
+        returnSecureToken: true,
+      }
+    );
 
-    // Récupérer l’utilisateur dans Firestore si besoin
+    const { localId: uid, idToken } = authResponse.data;
+
+    // 2. Récupérer l’utilisateur dans Firestore
     const userDoc = await db.collection("users").doc(uid).get();
 
     if (!userDoc.exists) {
       return res.status(404).json({ error: "Utilisateur non trouvé en base" });
     }
 
-    // Renvoyer les infos utiles
-    res.status(200).json({ uid, ...userDoc.data() });
+    const userData = userDoc.data();
+
+    // 3. Renvoyer les données utiles + uid (+ idToken si tu veux)
+    res.status(200).json({
+      uid,
+      ...userData,
+      // idToken, // ← optionnel
+    });
+
   } catch (error) {
-    res.status(401).json({ error: "Token invalide ou expiré" });
+    console.error("Erreur de login :", error.response?.data || error.message);
+    res.status(401).json({ error: "Échec de l'authentification", details: error.message });
   }
 });
 
