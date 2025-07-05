@@ -4,6 +4,8 @@ const admin = require("firebase-admin");
 const db = admin.firestore();
 const axios = require("axios");
 
+FIREBASE_API_KEY="AIzaSyB2AvaoOrij0E_l8lV1GNX3SGc24ld9oPI"
+
 // routes/users.js (login)
 router.post("/login", async (req, res) => {
   const { email, password } = req.body;
