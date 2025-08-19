@@ -367,7 +367,7 @@ router.post('/adddepot', async (req, res) => {
   }
 });
 
-router.get('/getdepots', async (req, res) => {
+router.post('/getdepots', async (req, res) => {
   const { email, vendeurEmail } = req.body;
 
   if (!email || !vendeurEmail) {
