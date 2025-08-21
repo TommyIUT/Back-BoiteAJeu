@@ -653,29 +653,41 @@ router.post("/buy", async (req, res) => {
 
 
 router.post('/validatePayment', async (req, res) => {
-  const { emailAcheteur, idDepot } = req.body;
+  const { idDepot } = req.body;
 
-  if (!emailAcheteur || !idDepot) {
-    return res.status(400).json({ error: 'Champs requis manquants.' });
+  if (!idDepot) {
+    return res.status(400).json({ error: 'idDepot requis.' });
   }
 
   try {
-    // 🔍 Récupérer l'utilisateur acheteur
-    const acheteurSnap = await db.collection('users').where('email', '==', emailAcheteur).get();
-    if (acheteurSnap.empty) return res.status(404).json({ error: 'Acheteur non trouvé.' });
+    // 🔍 Retrouver l’acheteur à partir de la commande qui contient ce dépôt
+    const acheteursSnap = await db.collection('users').get();
+    let acheteurDoc = null;
+    let commandeIndex = -1;
 
-    const acheteurDoc = acheteurSnap.docs[0];
+    for (const doc of acheteursSnap.docs) {
+      const data = doc.data();
+      const commandes = data.commandes || [];
+      const idx = commandes.findIndex(cmd => cmd.id === idDepot);
+
+      if (idx !== -1) {
+        acheteurDoc = doc;
+        commandeIndex = idx;
+        break;
+      }
+    }
+
+    if (!acheteurDoc) {
+      return res.status(404).json({ error: 'Commande liée à ce dépôt non trouvée.' });
+    }
+
     const acheteurId = acheteurDoc.id;
     const acheteurData = acheteurDoc.data();
     const commandes = acheteurData.commandes || [];
 
-    // 🧾 Trouver la commande associée
-    const commandeIndex = commandes.findIndex(cmd => cmd.id === idDepot);
-    if (commandeIndex === -1) return res.status(404).json({ error: 'Commande non trouvée.' });
-
     const commande = commandes[commandeIndex];
 
-    // 📦 Rechercher le dépôt correspondant
+    // 📦 Rechercher le dépôt correspondant dans les vendeurs/gestionnaires
     const usersSnap = await db.collection('users').get();
     let gestionnaireDoc = null;
     let vendeurIndex = -1;
@@ -754,5 +766,6 @@ router.post('/validatePayment', async (req, res) => {
     res.status(500).json({ error: 'Erreur serveur.', details: err.message });
   }
 });
+
 
 module.exports = router;
