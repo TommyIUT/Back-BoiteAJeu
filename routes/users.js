@@ -754,6 +754,7 @@ router.post('/validatePayment', async (req, res) => {
 
     // 💸 Mise à jour des gains vendeur
     vendeurs[vendeurIndex].gains += prixHT;
+    vendeurs[vendeurIndex].a_encaisser -= prixHT;
 
     // 📝 Sauvegarder les modifications
     await db.collection('users').doc(gestionnaireId).update({ vendeurs });
