@@ -245,7 +245,7 @@ router.delete('/deletevendeur', async (req, res) => {
   }
 });
 
-router.get('/getvendeurs', async (req, res) => {
+router.post('/getvendeurs', async (req, res) => {
   const { email } = req.body;
 
   if (!email) {
