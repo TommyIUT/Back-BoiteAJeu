@@ -610,6 +610,12 @@ router.post("/buy", async (req, res) => {
 
     vendeurs[vendeurIndex].listedepot[depotIndex] = depotTrouve;
 
+    const prixDepot = parseFloat(depotTrouve.prix) || 0;
+    if (!vendeurs[vendeurIndex].a_encaisser) {
+      vendeurs[vendeurIndex].a_encaisser = 0;
+    }
+    vendeurs[vendeurIndex].a_encaisser += prixDepot;
+
     // ✅ Mettre à jour tout le tableau vendeurs
     await usersRef.doc(gestionnaireId).update({ vendeurs });
 
